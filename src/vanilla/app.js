@@ -507,3 +507,173 @@ export function mountPlayer() {
     }
   });
 }
+
+/* =========================
+   HOME PAGE
+========================= */
+
+/**
+ * Render the Home page: carousel, grid, filters, sorting.
+ */
+export async function renderHome() {
+  const carousel = $("#carousel");
+  const grid = $("#grid");
+  const genreFilter = $("#genreFilter");
+  const sortSelect = $("#sortSelect");
+  if (!carousel || !grid) return;
+
+  // show loading state while we fetch
+  carousel.innerHTML = `
+    <li class="card">
+      <div class="loading">
+        <div class="spinner"></div>
+        <p>Loading recommended shows…</p>
+      </div>
+    </li>
+  `;
+  grid.innerHTML = `
+    <div class="loading">
+      <div class="spinner"></div>
+      <p>Loading shows…</p>
+    </div>
+  `;
+
+  // genre dropdown
+  if (genreFilter && genreFilter.children.length <= 1) {
+    const frag = document.createDocumentFragment();
+    Object.entries(GENRES).forEach(([id, name]) => {
+      const opt = document.createElement("option");
+      opt.value = id;
+      opt.textContent = name;
+      frag.appendChild(opt);
+    });
+    genreFilter.appendChild(frag);
+  }
+
+  const ctrl = new AbortController();
+
+  try {
+    const data = await fetchPreviews(ctrl.signal);
+    let items = data;
+
+    function applyFilters() {
+      let list = items.slice();
+      const g = genreFilter?.value || "All Genres";
+      const s = sortSelect?.value || "newest";
+
+      if (g !== "All Genres") {
+        const gid = Number(g);
+        list = list.filter((it) => it.genres?.includes(gid));
+      }
+
+      if (s === "oldest") {
+        list.sort((a, b) => new Date(a.updated) - new Date(b.updated));
+      } else {
+        list.sort((a, b) => new Date(b.updated) - new Date(a.updated));
+      }
+
+      renderCarousel(list.slice(0, 10));
+      renderGrid(list);
+    }
+
+    genreFilter?.addEventListener("change", applyFilters);
+    sortSelect?.addEventListener("change", applyFilters);
+
+    applyFilters();
+  } catch (e) {
+    grid.innerHTML = `<p role="alert">Failed to load shows: ${
+      e.message || e
+    }</p>`;
+  }
+
+  function renderCarousel(list) {
+    carousel.innerHTML = "";
+
+    list.forEach((show) => {
+      const showFavId = `show:${show.id}`;
+      const active = isFaved(showFavId);
+      const li = document.createElement("li");
+      li.className = "card";
+      li.style.width = "260px";
+
+      li.innerHTML = `
+        ${renderHeartBtn(active)}
+        <a class="card-link" href="#/show/${show.id}">
+          <img src="${show.image}" alt="" class="cover" />
+          <h3>${show.title}</h3>
+          <div class="badges">
+            ${genreNames(show.genres)
+              .slice(0, 3)
+              .map((g) => `<span class="badge">${g}</span>`)
+              .join("")}
+          </div>
+        </a>
+      `;
+
+      const heart = li.querySelector(".heart");
+      heart.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        toggleFav({
+          id: showFavId,
+          title: show.title,
+          showId: String(show.id),
+          showTitle: show.title,
+          season: 0,
+          episode: 0,
+          cover: show.image,
+        });
+        heart.classList.toggle("on", isFaved(showFavId));
+      });
+
+      carousel.appendChild(li);
+    });
+
+    // loop back to start when user scrolls to end
+    carousel.addEventListener("scroll", () => {
+      const atEnd =
+        carousel.scrollLeft + carousel.clientWidth >= carousel.scrollWidth - 4;
+
+      if (atEnd) {
+        carousel.scrollTo({ left: 0, behavior: "smooth" });
+      }
+    });
+  }
+
+  function renderGrid(list) {
+    grid.innerHTML = "";
+    list.forEach((show) => {
+      const showFavId = `show:${show.id}`;
+      const active = isFaved(showFavId);
+      const card = document.createElement("article");
+      card.className = "card show-card";
+      card.innerHTML = `
+        ${renderHeartBtn(active)}
+        <a class="card-link" href="#/show/${show.id}">
+          <img class="cover" src="${show.image}" alt="">
+          <h3>${show.title}</h3>
+          <div class="pills">
+            <span class="pill">${show.seasons ?? 0} seasons</span>
+            <span class="pill">Updated ${fmtDate(show.updated)}</span>
+          </div>
+        </a>
+      `;
+      const heart = card.querySelector(".heart");
+      heart.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        toggleFav({
+          id: showFavId,
+          title: show.title,
+          showId: String(show.id),
+          showTitle: show.title,
+          season: 0,
+          episode: 0,
+          cover: show.image,
+        });
+        heart.classList.toggle("on", isFaved(showFavId));
+      });
+      grid.appendChild(card);
+    });
+  }
+}
