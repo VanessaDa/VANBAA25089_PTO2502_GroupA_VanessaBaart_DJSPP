@@ -81,3 +81,46 @@ function truncate(s = "", n = 120) {
 function genreNames(ids = []) {
   return ids.map((id) => GENRES[id] ?? `Genre ${id}`);
 }
+/* =========================
+   THEME
+========================= */
+
+const THEME_KEY = "earbuzz:theme";
+
+/**
+ * Initialise the current theme (light/dark) and attach the toggle button handler.
+ * Persists the theme in localStorage.
+ */
+export function initTheme() {
+  const btn = $("#themeToggle");
+  const saved = localStorage.getItem(THEME_KEY) || "light";
+
+  function setTheme(mode) {
+    document.documentElement.classList.toggle("dark", mode === "dark");
+    localStorage.setItem(THEME_KEY, mode);
+    if (btn) btn.textContent = mode === "dark" ? "☀️ Light" : "🌙 Dark";
+  }
+
+  // No button (page not fully mounted)
+  if (!btn) {
+    setTheme(saved);
+    return;
+  }
+
+  // Prevent attaching the toggle handler more than once (StrictMode + re-mounts)
+  if (btn.dataset.themeBound === "1") {
+    setTheme(saved);
+    return;
+  }
+
+  setTheme(saved);
+
+  btn.addEventListener("click", () => {
+    const next = document.documentElement.classList.contains("dark")
+      ? "light"
+      : "dark";
+    setTheme(next);
+  });
+
+  btn.dataset.themeBound = "1";
+}
