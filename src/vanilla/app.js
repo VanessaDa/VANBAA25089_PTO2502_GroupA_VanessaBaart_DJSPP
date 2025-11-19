@@ -124,3 +124,60 @@ export function initTheme() {
 
   btn.dataset.themeBound = "1";
 }
+
+/* =========================
+   FAVOURITES STORAGE
+========================= */
+
+const FAVS_KEY = "earbuzz:favs:v1";
+/**
+ * FavItem {
+ *  id: string;        // "show:<id>" or "showId:season:episode"
+ *  title: string;
+ *  showId: string;
+ *  showTitle: string;
+ *  season: number;
+ *  episode: number;
+ *  cover?: string;
+ *  audio?: string;    // episode audio URL (for playback from favourites)
+ *  addedAt: number;
+ * }
+ */
+
+function readFavs() {
+  try {
+    const raw = localStorage.getItem(FAVS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeFavs(list) {
+  localStorage.setItem(FAVS_KEY, JSON.stringify(list));
+}
+
+export function loadFavs() {
+  return readFavs();
+}
+
+export function isFaved(id) {
+  return readFavs().some((f) => f.id === id);
+}
+
+export function toggleFav(item) {
+  const list = readFavs();
+  const i = list.findIndex((f) => f.id === item.id);
+  if (i >= 0) {
+    list.splice(i, 1);
+  } else {
+    list.push({ ...item, addedAt: item.addedAt ?? Date.now() });
+  }
+  writeFavs(list);
+  return list;
+}
+
+export function clearFavs() {
+  writeFavs([]);
+}
