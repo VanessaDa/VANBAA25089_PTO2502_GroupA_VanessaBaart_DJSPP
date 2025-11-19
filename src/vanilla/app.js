@@ -677,3 +677,201 @@ export async function renderHome() {
     });
   }
 }
+/* =========================
+   SHOW PAGE
+========================= */
+
+/**
+ * Render the Show page.
+ * If idFromReact is provided (React HashRouter), that ID is used.
+ * Otherwise falls back to ?id= from the URL (vanilla usage).
+ */
+export async function renderShow(idFromReact) {
+  const cover = $("#showCover");
+  const titleEl = $("#showTitle");
+  const descEl = $("#showDescription");
+  const genresEl = $("#genres");
+  const updatedEl = $("#updatedMeta");
+  const seasonsMeta = $("#seasonsMeta");
+  const seasonSelect = $("#seasonSelect");
+  const list = $("#episodeList");
+  if (!list || !seasonSelect) return;
+
+  // initial loading state
+  list.innerHTML = `
+    <div class="loading">
+      <div class="spinner"></div>
+      <p>Loading show details…</p>
+    </div>
+  `;
+
+  const searchId = new URLSearchParams(window.location.search || "").get("id");
+  const id = idFromReact ?? searchId;
+
+  if (!id) {
+    list.innerHTML = `<p role="alert">Missing show id.</p>`;
+    return;
+  }
+
+  const ctrl = new AbortController();
+  try {
+    const show = await fetchShowById(id, ctrl.signal);
+
+    if (cover) {
+      cover.src = show.image;
+    }
+    if (titleEl) {
+      titleEl.textContent = show.title;
+    }
+
+    // === DESCRIPTION WITH READ MORE / READ LESS ===
+    if (descEl) {
+      descEl.innerHTML = "";
+      const fullText = show.description || "";
+      const limit = 350;
+
+      if (fullText.length > limit) {
+        const shortSpan = document.createElement("span");
+        shortSpan.className = "desc-short";
+        shortSpan.textContent = fullText.slice(0, limit) + "...";
+
+        const fullSpan = document.createElement("span");
+        fullSpan.className = "desc-full";
+        fullSpan.textContent = fullText;
+        fullSpan.style.display = "none";
+
+        const toggleBtn = document.createElement("button");
+        toggleBtn.type = "button";
+        toggleBtn.className = "read-more-toggle";
+        toggleBtn.textContent = "Read more";
+
+        toggleBtn.addEventListener("click", () => {
+          const expanded = fullSpan.style.display === "inline";
+          if (expanded) {
+            fullSpan.style.display = "none";
+            shortSpan.style.display = "inline";
+            toggleBtn.textContent = "Read more";
+          } else {
+            fullSpan.style.display = "inline";
+            shortSpan.style.display = "none";
+            toggleBtn.textContent = "Read less";
+          }
+        });
+
+        descEl.append(shortSpan, fullSpan, toggleBtn);
+      } else {
+        descEl.textContent = fullText;
+      }
+    }
+    // === END DESCRIPTION BLOCK ===
+
+    if (genresEl) {
+      genresEl.innerHTML = genreNames(show.genres)
+        .map((g) => `<span class="genre">${g}</span>`)
+        .join("");
+    }
+
+    if (updatedEl) {
+      updatedEl.textContent = show.updated
+        ? `Updated ${fmtDate(show.updated)}`
+        : "";
+    }
+
+    if (seasonsMeta) {
+      seasonsMeta.textContent = `${show.seasons?.length || 0} season(s)`;
+    }
+
+    // build season dropdown
+    seasonSelect.innerHTML = "";
+    show.seasons
+      .slice()
+      .sort((a, b) => a.season - b.season)
+      .forEach((s) => {
+        const opt = document.createElement("option");
+        opt.value = s.season;
+        opt.textContent = `S${s.season}${s.title ? ` — ${s.title}` : ""}`;
+        seasonSelect.appendChild(opt);
+      });
+
+    function currentSeason() {
+      const sn = Number(seasonSelect.value || show.seasons?.[0]?.season || 1);
+      return show.seasons.find((s) => s.season === sn);
+    }
+
+    seasonSelect.addEventListener("change", () =>
+      renderSeason(currentSeason())
+    );
+
+    renderSeason(currentSeason());
+
+    function renderSeason(season) {
+      list.innerHTML = "";
+      if (!season) {
+        list.innerHTML = `<p class="muted">No episodes for this season.</p>`;
+        return;
+      }
+
+      season.episodes.forEach((ep) => {
+        const eid = `${show.id}:${season.season}:${ep.episode}`;
+        const etitle = ep.title || `Episode ${ep.episode}`;
+        const audio = ep.file || ep.audioUrl || "";
+
+        const row = document.createElement("div");
+        row.className = "episode-row";
+        row.innerHTML = `
+          <img class="ep-cover" src="${season.image || show.image}" alt="">
+          <div>
+            <div class="ep-title">${etitle}</div>
+            <div class="ep-summary">${truncate(ep.description || "", 200)}</div>
+            <div class="ep-meta">
+              <span class="muted">S${season.season} • E${ep.episode}</span>
+              <span class="ep-progress"></span>
+            </div>
+          </div>
+          <div class="actions">
+            ${renderHeartBtn(isFaved(eid))}
+            <button
+              class="action play"
+              type="button"
+              data-episode-id="${eid}"
+              data-audio-url="${audio}"
+              data-title="S${season.season}E${ep.episode} — ${etitle}"
+              data-subtitle="${show.title}"
+            >
+              Play
+            </button>
+          </div>
+        `;
+
+        // inject progress pill
+        const progressSlot = row.querySelector(".ep-progress");
+        if (progressSlot) {
+          progressSlot.innerHTML = renderProgressPill(eid);
+        }
+
+        const heart = row.querySelector(".heart");
+        heart.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          toggleFav({
+            id: eid,
+            title: etitle,
+            showId: String(show.id),
+            showTitle: show.title,
+            season: season.season,
+            episode: ep.episode,
+            cover: season.image || show.image,
+            audio,
+          });
+          heart.classList.toggle("on", isFaved(eid));
+        });
+
+        list.appendChild(row);
+      });
+    }
+  } catch (e) {
+    list.innerHTML = `<p role="alert">Failed to load show: ${
+      e.message || e
+    }</p>`;
+  }
+}
