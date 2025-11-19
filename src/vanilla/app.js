@@ -281,3 +281,229 @@ function renderHeartBtn(active) {
     </button>
   `;
 }
+/* =========================
+   GLOBAL AUDIO PLAYER
+========================= */
+
+/**
+ * Mount the global audio player.
+ * Restores last played track, listens for .play action buttons,
+ * and syncs progress + state in localStorage/sessionStorage.
+ */
+export function mountPlayer() {
+  // Prevent multiple initialisations (StrictMode + per-route calls)
+  if (window.__earbuzzPlayerMounted) {
+    return;
+  }
+  window.__earbuzzPlayerMounted = true;
+
+  const audio = $("#audio");
+  const playBtn = $("#playToggle");
+  const back10 = $("#back10");
+  const fwd10 = $("#fwd10");
+  const range = $("#progress");
+  const nowTitle = $("#nowTitle");
+  const nowSub = $("#nowSub");
+
+  if (!audio || !playBtn || !range || !nowTitle || !nowSub) {
+    console.warn("mountPlayer: missing core player elements");
+    return;
+  }
+
+  let current = null; // { id, title, subtitle, src }
+
+  // Restore last track + state if we have one
+  try {
+    const rawTrack =
+      sessionStorage.getItem(LAST_TRACK_KEY) ||
+      localStorage.getItem(LAST_TRACK_KEY);
+    const rawState = localStorage.getItem(LAST_TRACK_STATE_KEY);
+
+    const last = rawTrack ? JSON.parse(rawTrack) : null;
+    const lastState = rawState === "playing" ? "playing" : "paused";
+
+    if (last && last.id && last.src) {
+      current = last;
+      audio.src = last.src;
+
+      const t = loadProgress(last.id);
+      if (!isNaN(t) && t > 0) audio.currentTime = t;
+
+      nowTitle.textContent = last.title || "Now Playing";
+      nowSub.textContent = last.subtitle || "";
+
+      // Auto-resume if user was playing before navigation
+      if (lastState === "playing") {
+        audio
+          .play()
+          .then(() => {
+            playBtn.textContent = "⏸";
+          })
+          .catch(() => {
+            // If browser blocks autoplay, just show paused state
+            playBtn.textContent = "▶️";
+          });
+      } else {
+        playBtn.textContent = "▶️";
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  function setLastState(state) {
+    localStorage.setItem(LAST_TRACK_STATE_KEY, state);
+  }
+
+  // Main play / pause toggle in footer
+  playBtn.addEventListener("click", async () => {
+    if (!audio.src) return;
+    if (audio.paused) {
+      try {
+        await audio.play();
+        playBtn.textContent = "⏸";
+        setLastState("playing");
+      } catch (err) {
+        console.error("Footer playToggle error", err);
+      }
+    } else {
+      audio.pause();
+      playBtn.textContent = "▶️";
+      setLastState("paused");
+    }
+  });
+
+  back10?.addEventListener("click", () => {
+    audio.currentTime = Math.max(0, audio.currentTime - 10);
+  });
+
+  fwd10?.addEventListener("click", () => {
+    audio.currentTime = Math.min(
+      audio.duration || audio.currentTime + 10,
+      audio.currentTime + 10
+    );
+  });
+
+  range.addEventListener("input", (e) => {
+    const v = Number(e.target.value);
+    if (audio.duration) {
+      audio.currentTime = (v / 100) * audio.duration;
+    }
+  });
+
+  audio.addEventListener("timeupdate", () => {
+    if (!audio.duration) return;
+    const pct = (audio.currentTime / audio.duration) * 100;
+    range.value = String(Math.max(0, Math.min(100, Math.floor(pct))));
+    if (current?.id) {
+      saveProgress(current.id, audio.currentTime, false, audio.duration || 0);
+    }
+  });
+
+  audio.addEventListener("ended", () => {
+    if (current?.id) {
+      markFinished(current.id, audio.duration || 0);
+    }
+    playBtn.textContent = "▶️";
+    setLastState("paused");
+  });
+
+  // Warn if user reloads while audio is playing
+  window.addEventListener("beforeunload", (e) => {
+    if (!audio.paused) {
+      setLastState("playing");
+      const msg =
+        "Audio is currently playing. Are you sure you want to leave this page?";
+      e.preventDefault();
+      e.returnValue = msg;
+      return msg;
+    } else {
+      setLastState("paused");
+    }
+  });
+
+  async function setTrack(track) {
+    if (!track.src) {
+      console.warn("setTrack called without audio src", track);
+      return;
+    }
+
+    current = { ...track };
+
+    audio.src = current.src;
+    nowTitle.textContent = current.title || "Now Playing";
+    nowSub.textContent = current.subtitle || "";
+    sessionStorage.setItem(LAST_TRACK_KEY, JSON.stringify(current));
+    localStorage.setItem(LAST_TRACK_KEY, JSON.stringify(current));
+
+    const t = loadProgress(current.id);
+    if (!isNaN(t) && t > 0) audio.currentTime = t;
+
+    try {
+      await audio.play();
+      playBtn.textContent = "⏸";
+      setLastState("playing");
+    } catch (err) {
+      console.error("Audio play error", err);
+      playBtn.textContent = "▶️";
+      setLastState("paused");
+    }
+  }
+
+  // Make it visible globally for other module code
+  window.__setTrack = setTrack;
+
+  // Delegated click handler for ANY `.action.play` button
+  document.addEventListener("click", async (event) => {
+    const btn = event.target.closest(".action.play");
+    if (!btn) return;
+
+    const audioUrl = btn.dataset.audioUrl;
+    const showId = btn.dataset.showId;
+
+    try {
+      // CASE 1: Episode favourite – we already have an audio URL
+      if (audioUrl) {
+        const id =
+          btn.dataset.episodeId ||
+          btn.dataset.id ||
+          `temp:${Date.now().toString(36)}`;
+
+        const title = btn.dataset.title || "Now Playing";
+        const subtitle = btn.dataset.subtitle || "";
+
+        await setTrack({ id, title, subtitle, src: audioUrl });
+        return;
+      }
+
+      // CASE 2: Show favourite – fetch first episode and play it
+      if (showId) {
+        const show = await fetchShowById(showId);
+        const firstSeason = show.seasons?.[0];
+        const firstEp = firstSeason?.episodes?.[0];
+
+        if (!firstSeason || !firstEp) {
+          console.warn("No episodes found for show", showId);
+          return;
+        }
+
+        const audio = firstEp.file || firstEp.audioUrl || "";
+
+        if (!audio) {
+          console.warn("No audio URL for first episode of show", showId);
+          return;
+        }
+
+        const id = `${show.id}:${firstSeason.season}:${firstEp.episode}`;
+        const title =
+          `S${firstSeason.season}E${firstEp.episode} — ` +
+          (firstEp.title || show.title);
+        const subtitle = show.title;
+
+        await setTrack({ id, title, subtitle, src: audio });
+      }
+    } catch (err) {
+      console.error("Error handling Play button", err);
+    }
+  });
+}
