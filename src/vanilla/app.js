@@ -263,3 +263,21 @@ function renderProgressPill(id) {
   }
   return `<span class="status-pill in-progress">${label}</span>`;
 }
+/* =========================
+   HEART BUTTON (HTML)
+========================= */
+
+function renderHeartBtn(active) {
+  return `
+    <button
+      class="heart ${active ? "on" : ""}"
+      aria-pressed="${active}"
+      aria-label="${active ? "Unfavourite" : "Favourite"}"
+      type="button"
+    >
+      <svg viewBox="0 0 24 24">
+        <path d="M12 21s-6-4.35-9-7.5C1 12 1 8.5 4 7s5 1 8 4c3-3 5-4.5 8-3s3 5 1 6.5C18 16.65 12 21 12 21z"/>
+      </svg>
+    </button>
+  `;
+}
