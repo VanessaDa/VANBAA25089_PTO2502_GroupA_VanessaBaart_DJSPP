@@ -875,3 +875,202 @@ export async function renderShow(idFromReact) {
     }</p>`;
   }
 }
+/* =========================
+   FAVOURITES PAGE
+========================= */
+
+/**
+ * Render the Favourites page with sorting, filtering, grouping, and removal.
+ */
+export function renderFavourites() {
+  const container = $("#favContainer");
+  const sortSel = $("#favSort");
+  const filterSel = $("#favShowFilter");
+  const clearBtn = $("#clearFavs");
+  if (!container || !sortSel || !filterSel) return;
+
+  let favs = loadFavs();
+
+  // Add "Reset listening history" button into the toolbar (only on this page)
+  const toolbar = document.querySelector(".toolbar");
+  if (toolbar && !document.querySelector("#resetHistory")) {
+    const resetBtn = document.createElement("button");
+    resetBtn.id = "resetHistory";
+    resetBtn.type = "button";
+    resetBtn.className = "btn btn-danger";
+    resetBtn.textContent = "Reset listening history";
+    toolbar.appendChild(resetBtn);
+
+    resetBtn.addEventListener("click", () => {
+      if (confirm("Reset all listening progress for all episodes?")) {
+        clearAllProgress();
+        render();
+      }
+    });
+  }
+
+  // Populate the "Filter by show" dropdown
+  function refreshFilter() {
+    const shows = [...new Set(favs.map((f) => f.showTitle))].sort((a, b) =>
+      a.localeCompare(b)
+    );
+    filterSel.innerHTML =
+      `<option value="__all">All Shows</option>` +
+      shows.map((s) => `<option value="${s}">${s}</option>`).join("");
+  }
+
+  function render() {
+    const sort = sortSel.value;
+    const filter = filterSel.value;
+    let list = favs.slice();
+
+    // Filter by show
+    if (filter !== "__all") {
+      list = list.filter((f) => f.showTitle === filter);
+    }
+
+    // Sorting
+    switch (sort) {
+      case "oldest":
+        list.sort((a, b) => a.addedAt - b.addedAt);
+        break;
+      case "az":
+        list.sort((a, b) => a.title.localeCompare(b.title));
+        break;
+      case "za":
+        list.sort((a, b) => b.title.localeCompare(a.title));
+        break;
+      default: // newest
+        list.sort((a, b) => b.addedAt - a.addedAt);
+    }
+
+    // Group by show title
+    const groups = new Map();
+    list.forEach((f) => {
+      if (!groups.has(f.showTitle)) groups.set(f.showTitle, []);
+      groups.get(f.showTitle).push(f);
+    });
+
+    container.innerHTML = "";
+    if (list.length === 0) {
+      container.innerHTML = `<p class="muted">No favourites yet. Add some from a show page ♥</p>`;
+      return;
+    }
+
+    for (const [showTitle, items] of groups.entries()) {
+      const sec = document.createElement("section");
+
+      sec.innerHTML = `
+        <div class="group">
+          ${showTitle} <span class="count">(${items.length} episodes)</span>
+        </div>
+        <div class="episode-list"></div>
+      `;
+
+      const wrap = sec.querySelector(".episode-list");
+
+      items.forEach((f) => {
+        const cover = f.cover || "";
+        const isEpisode = f.season && f.season > 0 && f.episode > 0;
+        const audio = f.audio || "";
+
+        const row = document.createElement("div");
+        row.className = "episode-row";
+
+        let actionsHtml;
+        if (isEpisode) {
+          // Episode favourite -> real Play button
+          actionsHtml = `
+            ${renderHeartBtn(true)}
+            <button
+              class="action play"
+              type="button"
+              data-episode-id="${f.id}"
+              data-audio-url="${audio}"
+              data-title="${f.showTitle} — ${f.title}"
+              data-subtitle="${f.showTitle}"
+            >
+              Play
+            </button>
+            <button class="action remove" type="button">Remove</button>
+          `;
+        } else {
+          // Show-level favourite -> "Play" that opens the show
+          actionsHtml = `
+    ${renderHeartBtn(true)}
+    <button
+      class="action play"
+      type="button"
+      data-show-id="${f.showId}"
+    >
+      Play
+    </button>
+    <button class="action remove" type="button">Remove</button>
+  `;
+        }
+
+        row.innerHTML = `
+          <img class="ep-cover" src="${cover}" alt="">
+          <div>
+            <div class="ep-title">${f.title}</div>
+            <div class="ep-summary">
+              Added ${fmtDateTime(f.addedAt)}
+            </div>
+            <div class="ep-meta">
+              <span class="muted">S${f.season} • E${f.episode}</span>
+              <span class="ep-progress"></span>
+            </div>
+          </div>
+          <div class="actions">
+            ${actionsHtml}
+          </div>
+        `;
+
+        const progressSlot = row.querySelector(".ep-progress");
+        if (progressSlot && isEpisode) {
+          progressSlot.innerHTML = renderProgressPill(f.id);
+        }
+
+        const heart = row.querySelector(".heart");
+        const removeBtn = row.querySelector(".action.remove");
+
+        const doRemove = () => {
+          toggleFav(f);
+          favs = loadFavs();
+          refreshFilter();
+          render();
+        };
+
+        heart.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          doRemove();
+        });
+
+        removeBtn.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          doRemove();
+        });
+
+        wrap.appendChild(row);
+      });
+
+      container.appendChild(sec);
+    }
+  }
+
+  sortSel.addEventListener("change", render);
+  filterSel.addEventListener("change", render);
+  clearBtn?.addEventListener("click", () => {
+    if (confirm("Clear all favourites?")) {
+      clearFavs();
+      favs = [];
+      refreshFilter();
+      render();
+    }
+  });
+
+  refreshFilter();
+  render();
+}
