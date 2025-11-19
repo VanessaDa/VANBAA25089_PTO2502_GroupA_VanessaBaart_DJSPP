@@ -181,3 +181,85 @@ export function toggleFav(item) {
 export function clearFavs() {
   writeFavs([]);
 }
+
+/* =========================
+   LISTENING PROGRESS
+========================= */
+
+const LAST_TRACK_KEY = "earbuzz:lastTrack:v1";
+const LAST_TRACK_STATE_KEY = "earbuzz:lastTrackState:v1"; // "playing" | "paused"
+const PROG_KEY = "earbuzz:progress:v1";
+/** { [episodeId]: { t:number, finished?:boolean, duration?:number } } */
+
+function readProg() {
+  try {
+    const raw = localStorage.getItem(PROG_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+    return map && typeof map === "object" ? map : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeProg(map) {
+  localStorage.setItem(PROG_KEY, JSON.stringify(map));
+}
+
+export function saveProgress(id, t, finished, duration) {
+  const map = readProg();
+  const prev = map[id] || {};
+  map[id] = {
+    t,
+    finished: finished || prev.finished,
+    duration: typeof duration === "number" ? duration : prev.duration ?? 0,
+  };
+  writeProg(map);
+}
+
+export function loadProgress(id) {
+  const entry = readProg()[id];
+  return entry?.t ?? 0;
+}
+
+export function markFinished(id, duration) {
+  const map = readProg();
+  const prev = map[id] || {};
+  map[id] = {
+    t: prev.t ?? (typeof duration === "number" ? duration : 0),
+    finished: true,
+    duration: typeof duration === "number" ? duration : prev.duration ?? 0,
+  };
+  writeProg(map);
+}
+
+export function getProgress(id) {
+  const map = readProg();
+  return map[id] || null;
+}
+
+export function clearAllProgress() {
+  localStorage.removeItem(PROG_KEY);
+  // also clear last track so everything is fresh
+  localStorage.removeItem(LAST_TRACK_KEY);
+  localStorage.removeItem(LAST_TRACK_STATE_KEY);
+  sessionStorage.removeItem(LAST_TRACK_KEY);
+}
+
+/* Helper to render a status pill */
+function renderProgressPill(id) {
+  const p = getProgress(id);
+  if (!p) return "";
+
+  if (p.finished) {
+    return `<span class="status-pill finished">Finished</span>`;
+  }
+
+  let label = "In progress";
+  if (p.duration && p.duration > 0 && p.t >= 0) {
+    const pct = Math.round((p.t / p.duration) * 100);
+    if (isFinite(pct) && pct >= 0 && pct <= 100) {
+      label = `In progress • ${pct}%`;
+    }
+  }
+  return `<span class="status-pill in-progress">${label}</span>`;
+}
